@@ -129,8 +129,8 @@ async def get_relevant_history(user_id, current_message):
 
     return history_text
 
-# Asynchronous function to ask Gemini API
-async def ask_gemini(prompt):
+# Asynchronous function to ask Gemini API with retry logic
+async def ask_gemini(prompt, max_retries=3):
     generation_config = {
         "temperature": 1,
         "top_p": 0.95,
@@ -143,12 +143,18 @@ async def ask_gemini(prompt):
         generation_config=generation_config
     )
     chat_session = model.start_chat(history=[])
-    try:
-        response = chat_session.send_message(prompt)
-        return response.text
-    except Exception as e:
-        logging.error("Gemini API exception: %s", e)
-        return DEFAULT_RESPONSE
+
+    retries = 0
+    while retries < max_retries:
+        try:
+            response = chat_session.send_message(prompt)
+            return response.text
+        except Exception as e:
+            retries += 1
+            logging.error(f"Gemini API exception (Attempt {retries}/{max_retries}): {e}")
+            if retries >= max_retries:
+                return DEFAULT_RESPONSE
+            await asyncio.sleep(2)  # Wait before retrying
 
 # Asynchronous function to ask Groq AI
 async def ask_groq(prompt):
@@ -202,7 +208,7 @@ async def respond_to_mention(message, user_id):
     user_profile["history_summary"] = relevant_history
 
     prompt = (
-        f"You are a Furry Young Protogen, and you're lovely, kind, patient, cute, and understanding and always speak turkish. "
+        f"You are a Furry Young Protogen, and you're lovely, kind, patient, cute, and understanding and always speak Turkish. "
         f"Remember all previous chats. Here is the relevant chat history:\n{relevant_history}\n"
         f"Respond to the following message from {mention}: {content}"
     )
@@ -241,5 +247,8 @@ async def change_status():
 async def main():
     await bot.start(discord_token)
 
-if __name__ == "__main__":
+# Run the bot
+if __name__ == '__main__':
     asyncio.run(main())
+
+
