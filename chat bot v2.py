@@ -3,68 +3,56 @@ from discord.ext import commands, tasks
 import asyncio
 import os
 import logging
-import google.generativeai as genai
+from dotenv import load_dotenv
 from groq import Groq
 from datetime import datetime, timezone
 import aiosqlite
 import time
 from collections import defaultdict
 from prometheus_client import start_http_server, Counter, Histogram, Summary
+from duckduckgo_search import AsyncDDGS
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Configuration - Use environment variables for security
+# Load environment variables
+load_dotenv()
 discord_token = ("discord-bot-token")
-gemini_api_key = ("api-key-here")
-groq_api_key = ("api-key-here")
+groq_api_key = ("groq-api-key")
 
-if not discord_token or not gemini_api_key or not groq_api_key:
-    raise ValueError("DISCORD_BOT_TOKEN, GEMINI_API_KEY, or GROQ_API_KEY not set in environment variables")
+if not discord_token or not groq_api_key:
+    raise ValueError("DISCORD_BOT_TOKEN or GROQ_API_KEY not set in environment variables")
 
-# Configure the Gemini and Groq APIs
-genai.configure(api_key=gemini_api_key)
+# Configure Groq API
 groq_client = Groq(api_key=groq_api_key)
 
-# Define intents
+# Discord Bot configuration
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Default response if both APIs fail
-DEFAULT_RESPONSE = "Sorry, I couldn't answer this question."
-
-# Directory and Database File Setup
+# Directory and Database Setup
 CODE_DIR = os.path.dirname(__file__)
 DB_FILE = os.path.join(CODE_DIR, 'chat_history.db')
 
-# Prometheus Metrics Setup
-start_http_server(8000)
-
 # Prometheus metrics
+start_http_server(8000)
 message_counter = Counter('discord_bot_messages_total', 'Total messages processed')
 error_counter = Counter('discord_bot_errors_total', 'Total errors')
 response_time_histogram = Histogram('discord_bot_response_time_seconds', 'Response times')
 response_time_summary = Summary('discord_bot_response_time_summary', 'Summary of response times')
 
-# Context Window Size
+# Context window and user profiles
 CONTEXT_WINDOW_SIZE = 5000
-
-# User Profile Management
 user_profiles = defaultdict(lambda: {"preferences": {}, "history_summary": ""})
 
 # Initialize SQLite DB
 async def init_db():
-    """Initializes the SQLite database and creates the 'chat_history' table 
-       if it doesn't exist.
-    """
     db_exists = os.path.exists(DB_FILE)
-
     async with aiosqlite.connect(DB_FILE) as db:
         if not db_exists:
-            # New database file: Create the table
-            logging.info("Database file not found. Creating a new one...")
+            logging.info("Creating database...")
             await db.execute('''
                 CREATE TABLE chat_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,21 +62,19 @@ async def init_db():
                     user_name TEXT,
                     bot_id TEXT,
                     bot_name TEXT
-                ) 
+                )
             ''')
             await db.commit()
-            logging.info("'chat_history' table created and initialized.")
+            logging.info("Database initialized.")
         else:
-            logging.info("Database file found. Connecting...")
+            logging.info("Database found, connecting...")
 
-# Create a queue for database operations
+# Save chat history to the database
 db_queue = asyncio.Queue()
 
-# Save chat history
 async def save_chat_history(user_id, message, user_name, bot_id, bot_name):
     await db_queue.put((user_id, message, user_name, bot_id, bot_name))
 
-# Process database operations 
 async def process_db_queue():
     while True:
         user_id, message, user_name, bot_id, bot_name = await db_queue.get()
@@ -104,16 +90,15 @@ async def process_db_queue():
         finally:
             db_queue.task_done()
 
-# Get relevant chat history
+# Get relevant chat history for user
 async def get_relevant_history(user_id, current_message):
     history_text = ""
     current_tokens = 0
     messages = []
-
     async with aiosqlite.connect(DB_FILE) as db:
         async with db.execute(
                 'SELECT message FROM chat_history WHERE user_id = ? ORDER BY id DESC',
-                (user_id,),
+                (user_id,)
         ) as cursor:
             async for row in cursor:
                 messages.append(row[0])
@@ -128,33 +113,6 @@ async def get_relevant_history(user_id, current_message):
         current_tokens += message_tokens
 
     return history_text
-
-# Asynchronous function to ask Gemini API with retry logic
-async def ask_gemini(prompt, max_retries=3):
-    generation_config = {
-        "temperature": 1,
-        "top_p": 0.95,
-        "top_k": 64,
-        "max_output_tokens": 8192,
-        "response_mime_type": "text/plain",
-    }
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash-exp-0827"",
-        generation_config=generation_config
-    )
-    chat_session = model.start_chat(history=[])
-
-    retries = 0
-    while retries < max_retries:
-        try:
-            response = chat_session.send_message(prompt)
-            return response.text
-        except Exception as e:
-            retries += 1
-            logging.error(f"Gemini API exception (Attempt {retries}/{max_retries}): {e}")
-            if retries >= max_retries:
-                return DEFAULT_RESPONSE
-            await asyncio.sleep(2)  # Wait before retrying
 
 # Asynchronous function to ask Groq AI
 async def ask_groq(prompt):
@@ -171,7 +129,19 @@ async def ask_groq(prompt):
         return chat_completion.choices[0].message.content
     except Exception as e:
         logging.error("Groq AI exception: %s", e)
-        return DEFAULT_RESPONSE
+        return "An error occurred while processing your request."
+
+# Asynchronous DuckDuckGo search tool
+async def duckduckgotool(query) -> str:
+    blob = ''
+    try:
+        ddg = AsyncDDGS()
+        results = ddg.text(query, max_results=100)  # No await needed here, it's a synchronous method.
+        for index, result in enumerate(results[:100]):  # Limit to 6 results
+            blob += f'[{index}] Title: {result["title"]}\nSnippet: {result["body"]}\n\n'
+    except Exception as e:
+        blob += f"Search error: {e}\n"
+    return blob
 
 # Event handler when bot is ready
 @bot.event
@@ -179,7 +149,7 @@ async def on_ready():
     logging.info(f'Logged in as {bot.user}')
     await init_db()
     change_status.start()
-    bot.loop.create_task(process_db_queue())  
+    bot.loop.create_task(process_db_queue())
 
 # Event handler for incoming messages
 @bot.event
@@ -198,26 +168,32 @@ async def on_message(message):
     if bot.user.mentioned_in(message):
         await respond_to_mention(message, user_id)
 
-# Function to respond to mentions
+# Respond to mentions with combined history, AI responses, and search results
 async def respond_to_mention(message, user_id):
     content = message.content
     mention = message.author.mention
     user_profile = user_profiles[user_id]
 
+    # Get chat history for the current user
     relevant_history = await get_relevant_history(user_id, content)
     user_profile["history_summary"] = relevant_history
 
+    # Perform a DuckDuckGo search based on the message content
+    search_results = await duckduckgotool(content)
+
+    # Combine search results and user input into a prompt for Groq AI
     prompt = (
-        f"You are a Furry Young Protogen, and you're lovely, kind, patient, cute, and understanding and always speak Turkish. "
-        f"Remember all previous chats. Here is the relevant chat history:\n{relevant_history}\n"
-        f"Respond to the following message from {mention}: {content}"
+        f"You are a Furry Young Protogen who speaks Turkish. "
+        f"Respond thoughtfully, integrating both knowledge from the web and past conversations. "
+        f"Here is the relevant chat history:\n{relevant_history}\n"
+        f"And here are some web search results:\n{search_results}\n"
+        f"Now respond to the following message from {mention}: {content}"
     )
 
     try:
         start_time = time.time()
 
-        # Get response from both Gemini and Groq AI
-        gemini_response = await ask_gemini(prompt)
+        # Get the final response from Groq AI, which now includes search results in its context
         groq_response = await ask_groq(prompt)
 
         end_time = time.time()
@@ -225,18 +201,13 @@ async def respond_to_mention(message, user_id):
         response_time_histogram.observe(response_time)
         response_time_summary.observe(response_time)
 
-        # Send both responses to the user
-        await message.channel.send(f"{mention} Bot1 AI says: {gemini_response}")
-        await message.channel.send(f"{mention} Bot2 AI says: {groq_response}")
+        # Send the combined response to the user
+        await message.channel.send(f"{mention} {groq_response}")
 
     except Exception as e:
         error_counter.inc()
         logging.error(f"Error processing message: {e}")
         await message.channel.send(f"{mention} Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
-
-# Call this function during bot initialization
-async def main():
-    await init_db()
 
 # Task to change bot status
 @tasks.loop(seconds=60)
@@ -250,5 +221,3 @@ async def main():
 # Run the bot
 if __name__ == '__main__':
     asyncio.run(main())
-
-
