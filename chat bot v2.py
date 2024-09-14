@@ -12,6 +12,7 @@ from collections import defaultdict
 from prometheus_client import start_http_server, Counter, Histogram, Summary
 from duckduckgo_search import AsyncDDGS
 import datetime
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
