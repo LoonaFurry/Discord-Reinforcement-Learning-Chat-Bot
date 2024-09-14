@@ -139,7 +139,7 @@ async def ask_gemini(prompt, max_retries=3):
         "response_mime_type": "text/plain",
     }
     model = genai.GenerativeModel(
-        model_name="gemini-1.5-pro",
+        model_name="gemini-1.5-flash-exp-0827"",
         generation_config=generation_config
     )
     chat_session = model.start_chat(history=[])
