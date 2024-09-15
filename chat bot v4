@@ -214,8 +214,8 @@ async def duckduckgotool(query) -> str:
     blob = ''
     try:
         ddg = AsyncDDGS()
-        results = ddg.text(query, max_results=10000)
-        for index, result in enumerate(results[:10000]):
+        results = ddg.text(query, max_results=100)
+        for index, result in enumerate(results[:100]):
             blob += f'[{index}] Title: {result["title"]}\nSnippet: {result["body"]}\n\n'
     except Exception as e:
         blob += f"Search error: {e}\n"
