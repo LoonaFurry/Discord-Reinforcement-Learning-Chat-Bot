@@ -20,6 +20,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import pipeline as transformers_pipeline
 from spacy import load
+import huggingface_hub
+
+# --- Initialize Hugging Face Token ---
+huggingface_hub.login(token="your-huggingface-token")
 
 # --- Initialize Logging and Environment ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,6 +31,7 @@ load_dotenv()
 
 discord_token = ("discord-bot-token")
 gemini_api_key = ("gemini-key-here")
+
 
 if not discord_token or not gemini_api_key:
     raise ValueError("DISCORD_BOT_TOKEN or GEMINI_API_KEY not set in environment variables")
@@ -102,8 +107,8 @@ class TopicModel:
             self.dictionary = Dictionary()
             self.lda_model = LdaMulticore(corpus=[], id2word=self.dictionary, num_topics=self.num_topics)
         elif self.model_type == "bert":
-            self.tokenizer = AutoTokenizer.from_pretrained("nlptown/bert-base-multilingual-cased-sentiment")
-            self.model = AutoModelForSequenceClassification.from_pretrained("nlptown/bert-base-multilingual-cased-sentiment")
+            self.tokenizer = AutoTokenizer.from_pretrained("nlptown/bert-base-multilingual-cased-sentiment")  # Assuming you have access to this model
+            self.model = AutoModelForSequenceClassification.from_pretrained("nlptown/bert-base-multilingual-cased-sentiment")  # Assuming you have access to this model
         else:
             raise ValueError("Geçersiz konu modeli türü.")
 
@@ -162,7 +167,7 @@ class QuestionAnalyzer:
     def __init__(self):
         self.nlp = load("tr_core_news_lg")  # Use a larger SpaCy model
         self.question_classifier = transformers_pipeline("question-answering", model="bert-large-uncased-whole-word-masking-finetuned-squad")
-        self.question_type_classifier = transformers_pipeline("text-classification", model="your_question_type_classification_model")  # Replace with your model
+        self.question_type_classifier = transformers_pipeline("text-classification", model="bert-base-uncased-squad2")  # Replace with your model
         self.tfidf_vectorizer = TfidfVectorizer()
 
 
