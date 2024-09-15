@@ -90,7 +90,6 @@ status_messages = [
 async def update_status():
     await bot.change_presence(activity=discord.Game(random.choice(status_messages)))
 
-update_status.start()  # Görevi başlat
 
 # --- Topic Model ---
 class TopicModel:
@@ -598,6 +597,8 @@ async def on_ready():
     await init_db()
     bot.loop.create_task(process_db_queue())
     await analyze_feedback_from_db()
+    update_status.start()  # Start the task after the bot is ready
+
 
 @bot.event
 async def on_message(message):
