@@ -107,8 +107,8 @@ class TopicModel:
             self.dictionary = Dictionary()
             self.lda_model = LdaMulticore(corpus=[], id2word=self.dictionary, num_topics=self.num_topics)
         elif self.model_type == "bert":
-            self.tokenizer = AutoTokenizer.from_pretrained("T5-large/3B")  # Assuming you have access to this model
-            self.model = AutoModelForSequenceClassification.from_pretrained("T5-large/3B")  # Assuming you have access to this model
+            self.tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-3b")  # Assuming you have access to this model
+            self.model = AutoModelForSequenceClassification.from_pretrained("google-t5/t5-3b")  # Assuming you have access to this model
         else:
             raise ValueError("Geçersiz konu modeli türü.")
 
