@@ -23,7 +23,7 @@ from spacy import load
 import huggingface_hub
 
 # --- Initialize Hugging Face Token ---
-huggingface_hub.login(token="your-huggingface-token")
+huggingface_hub.login(token="your-huggingface-token", add_to_git_credential=True)
 
 # --- Initialize Logging and Environment ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
