@@ -65,14 +65,21 @@ CONTEXT_WINDOW_SIZE = 10000
 user_profiles = defaultdict(lambda: {"preferences": {}, "history_summary": "", "context": [], "personality": None, "dialogue_state": "greeting", "user_name": None})
 DIALOGUE_STATES = ["greeting", "question_answering", "storytelling", "general_conversation", "farewell", "neden_açıklaması"]
 
+# --- Database Initialization Flag ---
+db_initialized = False
+db_init_lock = asyncio.Lock()
+
 # --- Initialize SQLite Database ---
 async def init_db():
-    db_exists = os.path.exists(DB_FILE)
-    async with aiosqlite.connect(DB_FILE) as db:
-        if not db_exists:
-            logging.info("Creating database...")
+    global db_initialized
+    async with db_init_lock:  # Ensure only one instance initializes the database
+        if db_initialized:
+            return  # Database already initialized
+
+        async with aiosqlite.connect(DB_FILE) as db:
+            # Create tables if they don't exist
             await db.execute('''
-                CREATE TABLE chat_history (
+                CREATE TABLE IF NOT EXISTS chat_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id TEXT,
                     message TEXT,
@@ -83,7 +90,7 @@ async def init_db():
                 )
             ''')
             await db.execute('''
-                CREATE TABLE feedback (
+                CREATE TABLE IF NOT EXISTS feedback (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id TEXT,
                     feedback TEXT,
@@ -91,21 +98,9 @@ async def init_db():
                 )
             ''')
             await db.commit()
-            logging.info("Database initialized.")
-        else:
-            # Check if feedback table exists
-            async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback'") as cursor:
-                if not await cursor.fetchone():
-                    await db.execute('''
-                        CREATE TABLE feedback (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            user_id TEXT,
-                            feedback TEXT,
-                            timestamp TEXT
-                        )
-                    ''')
-                    await db.commit()
-            logging.info("Database found, connecting...")
+            logging.info("Database connected/initialized.")
+        db_initialized = True
+
 
 # --- User Profile Management ---
 def load_user_profiles():
@@ -130,6 +125,18 @@ async def process_db_queue():
         user_id, message, user_name, bot_id, bot_name = await db_queue.get()
         try:
             async with aiosqlite.connect(DB_FILE) as db:
+                # Ensure the table exists before inserting
+                await db.execute('''
+                    CREATE TABLE IF NOT EXISTS chat_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT,
+                        message TEXT,
+                        timestamp TEXT,
+                        user_name TEXT,
+                        bot_id TEXT,
+                        bot_name TEXT
+                    )
+                ''')
                 await db.execute(
                     'INSERT INTO chat_history (user_id, message, timestamp, user_name, bot_id, bot_name) VALUES (?, ?, ?, ?, ?, ?)',
                     (user_id, message, datetime.now(timezone.utc).isoformat(), user_name, bot_id, bot_name)
