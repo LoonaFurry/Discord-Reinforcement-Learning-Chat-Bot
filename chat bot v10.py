@@ -20,6 +20,7 @@ from sentence_transformers import SentenceTransformer, util  # For relevance fil
 # --- Initialize Logging and Environment ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 load_dotenv()
+
 discord_token = ("discord-bot-token")
 gemini_api_key = ("gemini-key-here")
 
