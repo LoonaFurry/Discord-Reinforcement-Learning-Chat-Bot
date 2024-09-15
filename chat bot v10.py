@@ -424,7 +424,15 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
-        return
+        # Save bot's messages as well
+        user_id = str(message.author.id)
+        user_name = message.author.name
+        bot_id = str(message.author.id) if message.author.bot else None
+        bot_name = message.author.name if message.author.bot else None
+        content = message.content
+
+        await save_chat_history(user_id, content, user_name, bot_id, bot_name)  # Save bot message
+        return 
 
     try:
         user_id = str(message.author.id)
@@ -454,15 +462,18 @@ async def on_message(message):
             if len(response) > 2000:
                 for i in range(0, len(response), 2000):
                     await message.channel.send(response[i:i + 2000])
+                    # Save bot's response after sending each chunk
+                    await save_chat_history(str(bot.user.id), response[i:i + 2000], bot.user.name, str(bot.user.id), bot.user.name)
             else:
                 await message.channel.send(response)
-
+                # Save bot's response after sending
+                await save_chat_history(str(bot.user.id), response, bot.user.name, str(bot.user.id), bot.user.name)
+            
             logging.info(f"Processed message from {user_name} in {response_time:.2f} seconds")
 
     except Exception as e:
         logging.error(f"An error occurred in on_message: {e}", exc_info=True)
-        await message.channel.send("I'm experiencing some technical difficulties. Please try again later.")
-
+        await message.channel.send("I'm experiencing some technical difficulties. Please try again later.") 
 
 @bot.event
 async def on_message_edit(before, after):
