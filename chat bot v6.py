@@ -429,7 +429,6 @@ async def on_message(message):
         logging.error(f"An error occurred in on_message: {e}", exc_info=True)
         await message.channel.send("I'm experiencing some technical difficulties. Please try again later.")
 
-
 @bot.event
 async def on_message_edit(before, after):
     logging.info(f"Message edited: {before.content} -> {after.content}")
