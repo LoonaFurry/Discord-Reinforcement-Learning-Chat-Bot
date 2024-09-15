@@ -398,9 +398,10 @@ async def on_message(message):
         # Her mesajı veritabanına kaydet
         user_id = str(message.author.id)
         user_name = message.author.name
-        bot_id = str(message.author.id) if message.author.bot else str(bot.user.id)  # Update for other bots
-        bot_name = message.author.name if message.author.bot else bot.user.name  # Update for other bots
+        bot_id = str(message.author.id) if message.author.bot else None  # Corrected
+        bot_name = message.author.name if message.author.bot else None  # Corrected
         content = message.content
+
 
         # Update user name in profile
         user_profiles[user_id]["user_name"] = user_name
