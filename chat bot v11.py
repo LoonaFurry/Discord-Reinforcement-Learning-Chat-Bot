@@ -160,38 +160,40 @@ class ContextStack:
 # --- Question Analyzer ---
 class QuestionAnalyzer:
     def __init__(self):
-        self.nlp = load("tr_core_news_sm")
+        self.nlp = load("tr_core_news_lg")  # Use a larger SpaCy model
         self.question_classifier = transformers_pipeline("question-answering", model="bert-large-uncased-whole-word-masking-finetuned-squad")
+        self.question_type_classifier = transformers_pipeline("text-classification", model="your_question_type_classification_model")  # Replace with your model
+        self.tfidf_vectorizer = TfidfVectorizer()
+
 
     def analyze(self, query):
-        # Placeholder for question type and entity extraction
-        # Implement logic to classify question type (e.g., information seeking, opinion, open-ended)
-        # Extract relevant entities from the query (e.g., named entities, keywords)
-
-        # Question Type Detection
-        question_type = "other"
-        if "nasıl" in query.lower():
-            question_type = "how_to"
-        elif "ne" in query.lower():
-            question_type = "what"
-        elif "kim" in query.lower():
-            question_type = "who"
-        elif "nerede" in query.lower():
-            question_type = "where"
-        elif "neden" in query.lower():
-            question_type = "why"
-
-        # Entity Extraction
         doc = self.nlp(query)
-        entities = [ent.text for ent in doc.ents]
 
-        # Question Answering Model to find relevant context
-        question_context_data = self.question_classifier(question=query, context=" ".join([c["query"] for c in user_profiles[user_id]["context_stack"].stack]))
-        if question_context_data:
-            context = question_context_data['answer']
-            entities.append(context)
+        # 1. Question Type Classification
+        question_type_prediction = self.question_type_classifier(query)
+        question_type = question_type_prediction[0]["label"]
 
-        return question_type, entities
+
+        # 2. Entity Recognition (NER)
+        entities = [(ent.text, ent.label_) for ent in doc.ents]
+
+        # 3. Keyword Extraction (TF-IDF)
+        tfidf_matrix = self.tfidf_vectorizer.fit_transform([query])  # You might want to pre-train on a larger corpus
+        feature_names = self.tfidf_vectorizer.get_feature_names_out()
+        keywords = [feature_names[i] for i in tfidf_matrix.nonzero()[1]]  # Extract top keywords
+
+
+        # 4. Semantic Role Labeling (SRL)
+        srl_data = {}
+        for sent in doc.sents:
+            srl_data[sent] = [(token.text, token.dep_) for token in sent]  # Collect dependency relations for SRL
+
+
+        # 5. Dependency Parsing (Parse Tree)
+        dependency_tree = [(token.text, token.dep_, token.head.text) for token in doc]  # Capture dependency tree
+
+
+        return question_type, entities, keywords, srl_data, dependency_tree
 
 # --- Gemini Interaction ---
 class GeminiInteraction:
