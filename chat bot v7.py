@@ -13,8 +13,6 @@ import google.generativeai as genai
 from datetime import datetime, timezone
 import json
 import random
-#from transformers import pipeline 
-
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -321,8 +319,8 @@ async def perform_advanced_reasoning(query, relevant_history, summarized_search,
     current_sentiment = await analyze_sentiment(query)
 
     # ONLY LOG SENTIMENT IF YOU NEED IT FOR DEBUGGING OR PROMPT CONSTRUCTION
-    # if current_sentiment:
-    #     logging.info(f"User sentiment: {current_sentiment}")
+    if current_sentiment:
+         logging.info(f"User sentiment: {current_sentiment}")
 
     # Update Dialogue State based on context
     if "question" in query.lower():
@@ -344,10 +342,8 @@ async def perform_advanced_reasoning(query, relevant_history, summarized_search,
 
     # Prompt Engineering
     personality = user_profiles[user_id]["personality"] if user_profiles[user_id]["personality"] else "neutral"
-    prompt = get_random_prompt_variation(user_id, query, personality, current_sentiment)
+    prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver."  # Simplified prompt, only Turkish instruction
 
-    # Add context information to the prompt
-    prompt += f"\n\nRelevant Chat History:\n{relevant_history}\n\nSearch Results Summary:\n{summarized_search}\n\nConversation Summary:\n{user_profiles[user_id]['history_summary']}"
 
     try:
         chat_session = model.start_chat(history=[])
@@ -355,7 +351,7 @@ async def perform_advanced_reasoning(query, relevant_history, summarized_search,
         return response.text
     except Exception as e:
         logging.error(f"Gemini AI reasoning exception: {e}")
-        return "An error occurred while processing your request with Gemini AI. Please try again later."
+        return "Bir hata oluştu. Lütfen daha sonra tekrar deneyin."  # Turkish error message
 
 # Asynchronous DuckDuckGo search tool
 async def duckduckgotool(query) -> str:
