@@ -20,7 +20,6 @@ from sentence_transformers import SentenceTransformer, util  # For relevance fil
 # --- Initialize Logging and Environment ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 load_dotenv()
-
 discord_token = ("discord-bot-token")
 gemini_api_key = ("gemini-key-here")
 
@@ -63,7 +62,7 @@ feedback_count = Counter('discord_bot_feedback_count', 'Number of feedback messa
 
 # --- Context and User Profiles ---
 CONTEXT_WINDOW_SIZE = 10000
-user_profiles = defaultdict(lambda: {"preferences": {}, "history_summary": "", "context": [], "personality": None, "dialogue_state": "greeting", "user_name": None})
+user_profiles = defaultdict(lambda: {"preferences": {}, "history_summary": "", "context": [], "personality": None, "dialogue_state": "greeting", "user_name": None, "dialogue_history": []})
 DIALOGUE_STATES = ["greeting", "question_answering", "storytelling", "general_conversation", "farewell", "neden_açıklaması"]
 
 # --- Database Initialization Flag ---
@@ -359,13 +358,36 @@ async def perform_advanced_reasoning(query, relevant_history, summarized_search,
     else:
         user_profiles[user_id]["dialogue_state"] = "general_conversation" 
 
+    # --- Update Dialogue History and Manage Length ---
+    user_profiles[user_id]["dialogue_history"].append({"query": query, "response": None})
+    if len(user_profiles[user_id]["dialogue_history"]) > 3:
+        user_profiles[user_id]["dialogue_history"].pop(0)  # Keep only the last 3 Q&A pairs
+
+    # Check for topic change and reset history if needed
+    previous_query = user_profiles[user_id]["dialogue_history"][-2]["query"] if len(user_profiles[user_id]["dialogue_history"]) > 1 else ""
+    if not (util.pytorch_cos_sim(embedder.encode(query), embedder.encode(previous_query)) > 0.7):
+        user_profiles[user_id]["dialogue_history"] = [{"query": query, "response": None}]
+
+
+    # --- Construct Dialogue Context ---
+    dialogue_context = ""
+    for i, item in enumerate(user_profiles[user_id]["dialogue_history"]):
+        dialogue_context += f"Soru {i+1}: {item['query']}\n"
+        if item['response']:
+            dialogue_context += f"Cevap {i+1}: {item['response']}\n"
+
+    # --- Summarize Dialogue Context (Optional) ---
+    # dialogue_context_summary = summarizer(dialogue_context, max_length=200, min_length=50, do_sample=False) 
+    # prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} {dialogue_context_summary} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver." 
+
     # --- Construct Prompt ---
-    prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver."  
-    
+    prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} {dialogue_context} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver."  
+
     # --- Send Prompt to Gemini with Token Limit Handling ---
     try:
         chat_session = model.start_chat(history=[])
         response = chat_session.send_message(prompt)
+        user_profiles[user_id]["dialogue_history"][-1]["response"] = response.text
         return response.text
     except google.generativeai.errors.TokenLimitExceededError:
         logging.warning("Gemini token limit exceeded. Retrying with a shorter context...")
@@ -377,11 +399,12 @@ async def perform_advanced_reasoning(query, relevant_history, summarized_search,
                 chunks = chunks[1:] # remove first chunk
                 relevant_history = "\n".join(["Chunk " + str(i) + ": " + chunk for i, chunk in enumerate(chunks)])
 
-        prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver."
+        prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} {dialogue_context} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver."
 
         # Retry with a shorter prompt
         chat_session = model.start_chat(history=[])
         response = chat_session.send_message(prompt)
+        user_profiles[user_id]["dialogue_history"][-1]["response"] = response.text
         return response.text
 
     except Exception as e:
