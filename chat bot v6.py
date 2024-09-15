@@ -13,7 +13,7 @@ import google.generativeai as genai
 from datetime import datetime, timezone
 import json
 import random
-import pipeline
+from transformers import pipeline 
 
 
 # Setup logging
