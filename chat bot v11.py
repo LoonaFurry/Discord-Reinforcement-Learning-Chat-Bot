@@ -18,13 +18,15 @@ from sentence_transformers import SentenceTransformer, util  # For relevance fil
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
+from transformers import pipeline as transformers_pipeline
+from spacy import load
 
 # --- Initialize Logging and Environment ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 load_dotenv()
-discord_token = os.getenv("DISCORD_BOT_TOKEN")
-gemini_api_key = os.getenv("GEMINI_API_KEY")
+
+discord_token = ("discord-bot-token")
+gemini_api_key = ("gemini-key-here")
 
 if not discord_token or not gemini_api_key:
     raise ValueError("DISCORD_BOT_TOKEN or GEMINI_API_KEY not set in environment variables")
@@ -65,7 +67,7 @@ feedback_count = Counter('discord_bot_feedback_count', 'Number of feedback messa
 
 # --- Context and User Profiles ---
 CONTEXT_WINDOW_SIZE = 10000
-user_profiles = defaultdict(lambda: {"preferences": {}, "history_summary": "", "context": [], "personality": None, 
+user_profiles = defaultdict(lambda: {"preferences": {}, "history_summary": "", "context": [], "personality": None,
                                      "dialogue_state": "greeting", "user_name": None, "dialogue_history": [],
                                      "topic_history": [], "context_stack": ContextStack()})
 DIALOGUE_STATES = ["greeting", "question_answering", "storytelling", "general_conversation", "farewell", "neden_açıklaması"]
@@ -74,6 +76,21 @@ DIALOGUE_STATES = ["greeting", "question_answering", "storytelling", "general_co
 db_initialized = False
 db_init_lock = asyncio.Lock()
 
+# --- Status Messages ---
+status_messages = [
+    "Derin Düşüncelerle Yolculuktayım...",
+    "Lolbitfurry Tarafından Yapıldım ^w^",
+    "Sohbet Etmek İçin Hazırım!",
+    "Yeni Bilgiler Öğreniyorum...",
+    "Sanal Dünyayı Keşfediyorum..."
+]
+
+# --- Status Update Task ---
+@tasks.loop(seconds=30)
+async def update_status():
+    await bot.change_presence(activity=discord.Game(random.choice(status_messages)))
+
+update_status.start()  # Görevi başlat
 
 # --- Topic Model ---
 class TopicModel:
@@ -144,12 +161,16 @@ class ContextStack:
 # --- Question Analyzer ---
 class QuestionAnalyzer:
     def __init__(self):
-        pass
+        self.nlp = load("tr_core_news_sm")
+        self.question_classifier = transformers_pipeline("question-answering", model="bert-large-uncased-whole-word-masking-finetuned-squad")
 
     def analyze(self, query):
         # Placeholder for question type and entity extraction
         # Implement logic to classify question type (e.g., information seeking, opinion, open-ended)
         # Extract relevant entities from the query (e.g., named entities, keywords)
+
+        # Question Type Detection
+        question_type = "other"
         if "nasıl" in query.lower():
             question_type = "how_to"
         elif "ne" in query.lower():
@@ -160,16 +181,18 @@ class QuestionAnalyzer:
             question_type = "where"
         elif "neden" in query.lower():
             question_type = "why"
-        else:
-            question_type = "other"
 
-        entities = []
-        for ent in ["köpek", "kedi", "kuş", "balık", "istanbul", "ankara", "izmir"]:
-            if ent in query.lower():
-                entities.append(ent)
-                
+        # Entity Extraction
+        doc = self.nlp(query)
+        entities = [ent.text for ent in doc.ents]
+
+        # Question Answering Model to find relevant context
+        question_context_data = self.question_classifier(question=query, context=" ".join([c["query"] for c in user_profiles[user_id]["context_stack"].stack]))
+        if question_context_data:
+            context = question_context_data['answer']
+            entities.append(context)
+
         return question_type, entities
-
 
 # --- Gemini Interaction ---
 class GeminiInteraction:
@@ -485,9 +508,9 @@ async def perform_advanced_reasoning(query, relevant_history, summarized_search,
     elif "goodbye" in query.lower() or "bye" in query.lower():
         user_profiles[user_id]["dialogue_state"] = "farewell"
     elif "neden" in query.lower():
-        user_profiles[user_id]["dialogue_state"] = "neden_açıklaması" 
+        user_profiles[user_id]["dialogue_state"] = "neden_açıklaması"
     else:
-        user_profiles[user_id]["dialogue_state"] = "general_conversation" 
+        user_profiles[user_id]["dialogue_state"] = "general_conversation"
 
     # --- Update Dialogue History and Manage Length ---
     user_profiles[user_id]["dialogue_history"].append({"query": query, "response": None})
@@ -508,11 +531,11 @@ async def perform_advanced_reasoning(query, relevant_history, summarized_search,
             dialogue_context += f"Cevap {i+1}: {item['response']}\n"
 
     # --- Summarize Dialogue Context (Optional) ---
-    dialogue_context_summary = summarizer(dialogue_context, max_length=200, min_length=50, do_sample=False) 
-    prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} {dialogue_context_summary} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver." 
+    dialogue_context_summary = summarizer(dialogue_context, max_length=200, min_length=50, do_sample=False)
+    prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} {dialogue_context_summary} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver."
 
     # --- Construct Prompt ---
-    prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} {dialogue_context} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver."  
+    prompt = f"Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. {relevant_history} {dialogue_context} Kullanıcı {query} dedi. Şimdi ona uygun bir şekilde cevap ver."
 
     # --- Send Prompt to Gemini with Token Limit Handling ---
     try:
@@ -627,6 +650,12 @@ async def on_message(message):
                                                       user_profiles[user_id]["context_stack"].get_relevant_contexts(content),
                                                       question_type, entities)
             response = await gemini_interaction.send_to_gemini(prompt)
+
+            # --- Durum Güncelleme ---
+            if "soru" in content.lower():
+                await bot.change_presence(activity=discord.Game("Düşünüyorum..."))  
+            else:
+                await bot.change_presence(activity=discord.Game(random.choice(status_messages)))
 
 
             end_time = time.time()
