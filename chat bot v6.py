@@ -230,19 +230,19 @@ async def summarize_conversation(conversation_history):
 
 
 async def analyze_sentiment(text):
-    """Analyzes the sentiment of the given text using Gemini AI."""
     prompt = f"""
     Analyze the sentiment of the following text:
     "{text}"
 
     Return the sentiment as one of the following labels:
-    - POSITIVE
-    - NEGATIVE
-    - NEUTRAL
+    - POSITIVE (e.g., happy, joyful, excited)
+    - NEGATIVE (e.g., sad, angry, disappointed)
+    - NEUTRAL (e.g., factual, objective, neutral)
 
-    For example, if the text expresses joy or happiness, return "POSITIVE".
-    If the text expresses sadness or anger, return "NEGATIVE".
-    If the text is neutral or objective, return "NEUTRAL".
+    Examples:
+    "I'm so thrilled about the new update!" -> POSITIVE
+    "This is incredibly frustrating." -> NEGATIVE
+    "The weather forecast predicts rain tomorrow." -> NEUTRAL
     """
 
     try:
