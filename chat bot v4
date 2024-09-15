@@ -246,35 +246,45 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Her mesajı veritabanına kaydet
-    user_id = str(message.author.id)
-    user_name = message.author.name
-    bot_id = str(bot.user.id)
-    bot_name = bot.user.name
-    content = message.content
+    try:
+        # Her mesajı veritabanına kaydet
+        user_id = str(message.author.id)
+        user_name = message.author.name
+        bot_id = str(bot.user.id)
+        bot_name = bot.user.name
+        content = message.content
 
-    # Kaydetme işlemi için sıraya ekle
-    await save_chat_history(user_id, content, user_name, bot_id, bot_name)
-    
-    # Eğer bot etiketlenmişse ya da adı geçiyorsa yanıt ver
-    if bot.user.mentioned_in(message) or bot.user.name in message.content:
-        user_personality = user_profiles[user_id]["preferences"].get("personality", None)
+        # Kaydetme işlemi için sıraya ekle
+        await save_chat_history(user_id, content, user_name, bot_id, bot_name)
 
-        message_counter.inc()
-        start_time = time.time()
+        # Eğer bot etiketlenmişse ya da adı geçiyorsa yanıt ver
+        if bot.user.mentioned_in(message) or bot.user.name in message.content:
+            user_personality = user_profiles[user_id]["preferences"].get("personality", None)
 
-        relevant_history = await get_relevant_history(user_id, content)
-        summarized_search = await duckduckgotool(content)
-        response = await perform_advanced_reasoning(content, relevant_history, summarized_search, user_personality)
+            message_counter.inc()
+            start_time = time.time()
 
-        end_time = time.time()
-        response_time = end_time - start_time
-        response_time_histogram.observe(response_time)
-        response_time_summary.observe(response_time)
+            relevant_history = await get_relevant_history(user_id, content)
+            summarized_search = await duckduckgotool(content)
+            response = await perform_advanced_reasoning(content, relevant_history, summarized_search, user_personality)
 
-        await message.channel.send(response)
+            end_time = time.time()
+            response_time = end_time - start_time
+            response_time_histogram.observe(response_time)
+            response_time_summary.observe(response_time)
 
-        logging.info(f"Processed message from {user_name} in {response_time:.2f} seconds")
+            # Handle long responses
+            if len(response) > 2000:
+                # Split the response into chunks of 2000 characters or less
+                for i in range(0, len(response), 2000):
+                    await message.channel.send(response[i:i + 2000])
+            else:
+                await message.channel.send(response)
+
+            logging.info(f"Processed message from {user_name} in {response_time:.2f} seconds")
+
+    except Exception as e:
+        logging.error(f"An error occurred in on_message: {e}", exc_info=True)
 
 
 @bot.event
