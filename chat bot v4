@@ -23,7 +23,6 @@ load_dotenv()
 discord_token = ("discord-bot-token")
 gemini_api_key = ("gemini-key-here")
 
-
 if not discord_token or not gemini_api_key:
     raise ValueError("DISCORD_BOT_TOKEN or GEMINI_API_KEY not set in environment variables")
 
@@ -247,13 +246,18 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    if bot.user.mentioned_in(message) or bot.user.name in message.content:
-        user_id = str(message.author.id)
-        user_name = message.author.name
-        bot_id = str(bot.user.id)
-        bot_name = bot.user.name
+    # Her mesajı veritabanına kaydet
+    user_id = str(message.author.id)
+    user_name = message.author.name
+    bot_id = str(bot.user.id)
+    bot_name = bot.user.name
+    content = message.content
 
-        content = message.content
+    # Kaydetme işlemi için sıraya ekle
+    await save_chat_history(user_id, content, user_name, bot_id, bot_name)
+    
+    # Eğer bot etiketlenmişse ya da adı geçiyorsa yanıt ver
+    if bot.user.mentioned_in(message) or bot.user.name in message.content:
         user_personality = user_profiles[user_id]["preferences"].get("personality", None)
 
         message_counter.inc()
@@ -269,9 +273,9 @@ async def on_message(message):
         response_time_summary.observe(response_time)
 
         await message.channel.send(response)
-        await save_chat_history(user_id, content, user_name, bot_id, bot_name)
 
         logging.info(f"Processed message from {user_name} in {response_time:.2f} seconds")
+
 
 @bot.event
 async def on_message_edit(before, after):
@@ -294,4 +298,3 @@ async def on_error(event, *args, **kwargs):
     logging.error(f"An error occurred: {event}")
 
 bot.run(discord_token)
-
