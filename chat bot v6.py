@@ -13,7 +13,7 @@ import google.generativeai as genai
 from datetime import datetime, timezone
 import json
 import random
-from transformers import pipeline 
+#from transformers import pipeline 
 
 
 # Setup logging
@@ -228,17 +228,38 @@ async def summarize_conversation(conversation_history):
         logging.error(f"Gemini AI summarization exception: {e}")
         return "I'm having trouble summarizing the conversation right now."
 
-# Sentiment analysis pipeline
-sentiment_analyzer = pipeline("sentiment-analysis")
 
-def analyze_sentiment(text):
-    """Analyzes the sentiment of the given text."""
+async def analyze_sentiment(text):
+    """Analyzes the sentiment of the given text using Gemini AI."""
+    prompt = f"""
+    Analyze the sentiment of the following text:
+    "{text}"
+
+    Return the sentiment as one of the following labels:
+    - POSITIVE
+    - NEGATIVE
+    - NEUTRAL
+
+    For example, if the text expresses joy or happiness, return "POSITIVE".
+    If the text expresses sadness or anger, return "NEGATIVE".
+    If the text is neutral or objective, return "NEUTRAL".
+    """
+
     try:
-        result = sentiment_analyzer(text)
-        return result[0]["label"]
+        chat_session = model.start_chat(history=[])
+        response = chat_session.send_message(prompt)
+        sentiment_label = response.text.strip().upper() 
+
+        # Validate the sentiment label 
+        if sentiment_label in ["POSITIVE", "NEGATIVE", "NEUTRAL"]:
+            return sentiment_label
+        else:
+            logging.warning(f"Gemini AI returned an invalid sentiment label: {sentiment_label}")
+            return "NEUTRAL" # Or handle the invalid label as needed 
+
     except Exception as e:
-        logging.error(f"Error analyzing sentiment: {e}")
-        return None
+        logging.error(f"Error analyzing sentiment with Gemini AI: {e}")
+        return None 
 
 
 # Prompt Engineering Functions 
@@ -291,7 +312,7 @@ async def perform_advanced_reasoning(query, relevant_history, summarized_search,
 
 
     # Sentiment Analysis 
-    current_sentiment = analyze_sentiment(query)
+    current_sentiment = await analyze_sentiment(query)
     if current_sentiment:
         logging.info(f"User sentiment: {current_sentiment}")
 
@@ -431,4 +452,4 @@ async def on_member_remove(member):
 async def on_error(event, *args, **kwargs):
     logging.error(f"An error occurred: {event}")
 
-bot.run(discord_token)
+bot.run(discord_token) 
