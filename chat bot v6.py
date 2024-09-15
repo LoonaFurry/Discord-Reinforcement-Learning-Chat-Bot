@@ -227,8 +227,8 @@ async def summarize_conversation(conversation_history):
         logging.error(f"Gemini AI summarization exception: {e}")
         return "I'm having trouble summarizing the conversation right now."
 
-
 async def analyze_sentiment(text):
+    """Analyzes the sentiment of the given text using Gemini AI."""
     prompt = f"""
     Analyze the sentiment of the following text:
     "{text}"
@@ -247,19 +247,18 @@ async def analyze_sentiment(text):
     try:
         chat_session = model.start_chat(history=[])
         response = chat_session.send_message(prompt)
-        sentiment_label = response.text.strip().upper() 
+        sentiment_label = response.text.strip().upper()
 
-        # Validate the sentiment label 
+        # Validation: Check if the sentiment label is one of the expected ones.
         if sentiment_label in ["POSITIVE", "NEGATIVE", "NEUTRAL"]:
             return sentiment_label
         else:
-            logging.warning(f"Gemini AI returned an invalid sentiment label: {sentiment_label}")
-            return "NEUTRAL" # Or handle the invalid label as needed 
+            logging.warning(f"Gemini AI returned an unexpected sentiment label: {sentiment_label}. Defaulting to 'NEUTRAL'.")
+            return "NEUTRAL" 
 
     except Exception as e:
         logging.error(f"Error analyzing sentiment with Gemini AI: {e}")
         return None 
-
 
 # Prompt Engineering Functions 
 def get_random_prompt_variation(user_id, query, personality, sentiment):
