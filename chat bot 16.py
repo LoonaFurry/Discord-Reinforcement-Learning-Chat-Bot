@@ -27,11 +27,10 @@ from pgmpy.factors.discrete import TabularCPD
 from groq import Groq 
 from datetime import timedelta
 from sklearn.metrics.pairwise import cosine_similarity # For cosine similarity calculation
-
+import sqlite3
 
 # --- Setup and Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 discord_token = ("discord-token-here")
 gemini_api_key = ("gemini-api-key")
 # Load environment variables from .env file
@@ -493,7 +492,6 @@ async def save_feedback_to_db(user_id, feedback):
 
 # --- Get relevant chat history for user ---
 
-
 async def get_relevant_history(user_id, current_message):
     if sentence_transformer:  # Using semantic similarity
         # Generate embedding for the current message
@@ -509,16 +507,18 @@ async def get_relevant_history(user_id, current_message):
                 FROM chat_history
                 WHERE user_id = ?
                 ORDER BY timestamp DESC 
-                LIMIT 100 # Limit the number of messages to compare for performance
-                """, (user_id, )) as cursor:
+                LIMIT 100 -- Limit the number of messages to compare for performance
+                """, (user_id,)) as cursor:
                 messages = []
                 for row in await cursor.fetchall():
                     message = row[0]
-                    embedding = json.loads(row[1])
+                    try:  # Try to load the embedding
+                        embedding = json.loads(row[1]) 
+                    except (json.JSONDecodeError, TypeError):
+                        embedding = None  # Set to None if embedding is invalid or missing
+                    
                     if embedding:  # Check if embedding exists
-                        similarity = cosine_similarity(
-                            [current_embedding], [embedding])[0][0
-                            ]  # Calculate cosine similarity
+                        similarity = cosine_similarity([current_embedding], [embedding])[0][0]
                         messages.append((message, similarity))
 
         # Sort messages by similarity in descending order
@@ -532,8 +532,7 @@ async def get_relevant_history(user_id, current_message):
 
     else:  # Not using semantic similarity, just retrieve recent messages
         return await get_recent_history(user_id)
-
-
+    
 # --- Function to retrieve recent history (if not using semantic similarity) ---
 async def get_recent_history(user_id):
     history_text = ""
