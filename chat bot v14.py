@@ -310,37 +310,34 @@ class GeminiInteraction:
             logging.error(f"Error sending to Gemini: {e}")
             return "Bir hata oluştu. Lütfen daha sonra tekrar deneyin.", action
 
-def generate_prompt(self, query, topic_history, context_stack, question_type, entities, current_topic, current_sentiment, user_preferences, chat_history):
-    # Construct prompt for Gemini based on context and question analysis, including chat history
-    prompt = f"""
+    def generate_prompt(self, query, context_stack, question_type, entities, current_sentiment, user_preferences, chat_history):
+        # Construct prompt for Gemini based on context and question analysis, including chat history
+        prompt = f"""
 Sen Türkçe konuşan, dost canlısı bir Furry genç Protogen'sin. 
 Kullanıcının önceki konuşmaları: {chat_history}.  # Include remembered chats
-Kullanıcının konuştuğu konular: {topic_history}.
 Kullanıcının son konuşmaları: {context_stack}.
 Kullanıcının sorduğu soru: {query}.
 Bu sorunun türü: {question_type}.
 Soruda geçen önemli ifadeler: {entities}.
-Mevcut konu: {current_topic}.
 Kullanıcının hissi: {current_sentiment}.
 Kullanıcının tercihleri: {user_preferences}.
 
 Şimdi kullanıcıya uygun bir şekilde cevap ver.
 """
-    return prompt
+        return prompt
 
-
-def learn(self, state, action, reward, next_state):
+    def learn(self, state, action, reward, next_state):
         # Q-learning update rule
         current_q = self.q_table[state][action]
         next_max_q = max(self.q_table[next_state].values(), default=0)
         new_q = current_q + self.learning_rate * (reward + self.discount_factor * next_max_q - current_q)
         self.q_table[state][action] = new_q
 
-def update_exploration_rate(self, episode):
+    def update_exploration_rate(self, episode):
         # Decay exploration rate over time
         self.exploration_rate = max(0.01, self.exploration_rate * 0.99)
 
-def default_action(self):
+    def default_action(self):
         # Define a default action to take when no actions are present
         return random.choice(list(self.conversation_styles.keys()))  # Return a random style
 
@@ -657,17 +654,17 @@ async def on_message(message):
             user_profiles[user_id]["current_sentiment"] = await analyze_sentiment_groq(content)
 
             # --- Generate Prompt for Gemini ---
+            # Create instance of GeminiInteraction here
             gemini_interaction = GeminiInteraction()
-            prompt = gemini_interaction.generate_prompt(content, user_profiles[user_id]["topic_history"],
-                                                      relevant_contexts,
+            prompt = gemini_interaction.generate_prompt(content, relevant_contexts,
                                                       question_type, entities,
-                                                      user_profiles[user_id]["current_topic"], 
                                                       user_profiles[user_id]["current_sentiment"],
-                                                      user_profiles[user_id]["preferences"])
+                                                      user_profiles[user_id]["preferences"],
+                                                      past_messages)
 
             # --- Call Gemini to Generate Response ---
             state = (current_dialog_state, user_profiles[user_id]["personality"], user_profiles[user_id]["current_sentiment"])
-            response, chosen_style = await gemini_interaction.send_to_gemini(prompt, state)
+            response, chosen_style = await gemini_interaction.send_to_gemini(content, state)  # Pass content to send_to_gemini
 
             # --- Handle Response (Chunking if needed) ---
             if len(response) > 2000:
