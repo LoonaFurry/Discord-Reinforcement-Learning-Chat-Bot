@@ -28,6 +28,10 @@ from groq import Groq
 from datetime import timedelta
 from sklearn.metrics.pairwise import cosine_similarity # For cosine similarity calculation
 import sqlite3
+from collections import deque
+from typing import Dict, Tuple
+import requests
+
 
 # --- Setup and Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -48,6 +52,52 @@ if not discord_token or not gemini_api_key or not groq_api_key:
     )
 
 genai.configure(api_key=gemini_api_key)
+# Global variable to store the last message timestamps
+last_message_time = {}
+
+# --- Function to handle rate limits for Gemini API ---
+async def safe_gemini_request(url, headers, data=None):
+    """Make a request to the Gemini API with rate limit handling."""
+    retry_attempts = 0
+    max_retries = 5  # Number of retry attempts in case of rate limits
+    backoff_time = 1  # Start with 1 second backoff time for exponential backoff
+
+    while retry_attempts < max_retries:
+        response = requests.post(url, headers=headers, data=json.dumps(data)) if data else requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 429:  # Rate limited
+            retry_after = int(response.headers.get("Retry-After", 1))  # Retry-After is in seconds
+            print(f"Rate limit reached. Retrying after {retry_after} seconds.")
+            await asyncio.sleep(retry_after)
+        else:
+            # Handle other possible errors (e.g., 500 Internal Server Error)
+            print(f"Error {response.status_code}: {response.text}")
+            retry_attempts += 1
+            await asyncio.sleep(backoff_time)
+            backoff_time *= 2  # Exponential backoff
+
+    raise Exception("Max retries exceeded for Gemini API request.")
+
+# --- Function to calculate response time ---
+def calculate_response_time(start_time):
+    """Calculate how long it took for the bot to respond."""
+    end_time = time.time()
+    response_time = end_time - start_time
+    return response_time
+
+# --- Function to calculate time lapse between bot responses ---
+def calculate_time_lapse(user_id):
+    """Calculate the time lapse between the bot's responses for a user."""
+    current_time = time.time()
+    if user_id in last_message_time:
+        time_lapse = current_time - last_message_time[user_id]
+    else:
+        time_lapse = None  # First time interaction with this user
+
+    last_message_time[user_id] = current_time
+    return time_lapse
 
 generation_config = {
     "temperature": 1,
@@ -291,6 +341,80 @@ active_users = Gauge('discord_bot_active_users', 'Number of active users')
 feedback_count = Counter('discord_bot_feedback_count',
                          'Number of feedback messages received')
 
+# Gemini Rate Limiting
+GEMINI_RATE_LIMIT = 10  # Max requests per user per second
+GEMINI_REQUEST_WINDOW = 1  # Window size in seconds
+gemini_request_timestamps: Dict[str, deque] = defaultdict(
+    lambda: deque(maxlen=GEMINI_RATE_LIMIT * GEMINI_REQUEST_WINDOW)
+)
+
+# --- Helper function to check and apply rate limiting ---
+def check_gemini_rate_limit(user_id: str) -> bool:
+    """
+    Checks if the user is within the rate limit for Gemini API calls.
+
+    Args:
+        user_id: The ID of the Discord user making the request.
+
+    Returns:
+        True if the user is within the rate limit, False otherwise.
+    """
+    current_time = time.time()
+    # Remove timestamps older than the window
+    gemini_request_timestamps[user_id] = deque(
+        [t for t in gemini_request_timestamps[user_id] if t + GEMINI_REQUEST_WINDOW > current_time],
+        maxlen=GEMINI_RATE_LIMIT * GEMINI_REQUEST_WINDOW
+    )
+    if len(gemini_request_timestamps[user_id]) >= GEMINI_RATE_LIMIT:
+        return False  # Rate limit exceeded
+    gemini_request_timestamps[user_id].append(current_time)
+    return True
+
+# --- Complex Rate Limit Handling ---
+RATE_LIMIT_WINDOW = 5  # Seconds
+RATE_LIMIT_MAX_REQUESTS = 20  # Total requests allowed in the window
+rate_limit_queue = asyncio.Queue()
+user_request_counts: Dict[str, Tuple[int, float]] = defaultdict(lambda: (0, 0))
+
+async def process_rate_limit_queue():
+    while True:
+        (user_id, start_time) = await rate_limit_queue.get()
+        current_time = time.time()
+        if current_time - start_time < RATE_LIMIT_WINDOW:
+            # User is still within the rate limit window
+            request_count, last_update = user_request_counts[user_id]
+            user_request_counts[user_id] = (request_count + 1, current_time)
+            logging.debug(f"User {user_id} request count: {request_count + 1}")
+            if request_count + 1 > RATE_LIMIT_MAX_REQUESTS:
+                # Rate limit exceeded
+                logging.warning(f"Rate limit exceeded for user {user_id}")
+                await rate_limit_queue.put((user_id, current_time))  # Put back in queue
+                await asyncio.sleep(RATE_LIMIT_WINDOW)  # Wait for the window to expire
+            else:
+                # User is within the rate limit
+                rate_limit_queue.task_done()
+        else:
+            # User's rate limit window has expired
+            user_request_counts[user_id] = (0, current_time)
+            logging.debug(f"User {user_id} rate limit reset.")
+            rate_limit_queue.task_done()
+
+# ---  Async Function to Handle Gemini API Calls with Rate Limiting ---
+async def handle_gemini_call(query, relevant_history, summarized_search, user_id, selected_action, long_term_memory):
+    """Handles Gemini API calls with rate limiting and returns the response."""
+    user_id = str(message.author.id)
+    await rate_limit_queue.put((user_id, time.time()))  # Add user to rate limit queue
+    try:
+        # Gemini API call
+        await rate_limit_queue.get()  # Wait for the rate limit queue to process the request
+        response = await perform_advanced_reasoning(
+                query, relevant_history, summarized_search, user_id,
+                selected_action, long_term_memory)
+        rate_limit_queue.task_done()
+        return response
+    except Exception as e:
+        logging.error(f"Gemini AI reasoning exception: {e}")
+        return "An error occurred while processing your request with Gemini AI."
 
 # Emotional Responses and Empathy Simulation
 def generate_emotional_response(user_message):
@@ -385,7 +509,8 @@ async def init_db():
                     bot_id TEXT,
                     bot_name TEXT, 
                     selected_action INTEGER,
-                    embedding TEXT 
+                    embedding TEXT,
+                    response_time REAL 
                 )
             ''')
             await db.execute('''
@@ -425,8 +550,10 @@ async def init_db():
                 if 'embedding' not in columns:
                     await db.execute("ALTER TABLE chat_history ADD COLUMN embedding TEXT")
                     await db.commit()
-
-            logging.info("Database found, connecting...")
+                if 'response_time' not in columns:
+                    await db.execute("ALTER TABLE chat_history ADD COLUMN response_time REAL")
+                    await db.commit()
+                logging.info("Database found, connecting...")
 
 
 # --- Initialize user profiles ---
@@ -450,14 +577,14 @@ db_queue = asyncio.Queue()
 
 
 async def save_chat_history(user_id, message, user_name, bot_id, bot_name,
-                           selected_action):
+                           selected_action, response_time):
     await db_queue.put((user_id, message, user_name, bot_id, bot_name,
-                       selected_action))
+                       selected_action, response_time))
 
 
 async def process_db_queue():
     while True:
-        user_id, message, user_name, bot_id, bot_name, selected_action = await db_queue.get()
+        (user_id, message, user_name, bot_id, bot_name, selected_action, response_time) = await db_queue.get()
         try:
             # Generate embedding for the message (optional, but recommended)
             if sentence_transformer:
@@ -470,9 +597,9 @@ async def process_db_queue():
 
             async with aiosqlite.connect(DB_FILE) as db:
                 await db.execute(
-                    'INSERT INTO chat_history (user_id, message, timestamp, user_name, bot_id, bot_name, selected_action, embedding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO chat_history (user_id, message, timestamp, user_name, bot_id, bot_name, selected_action, embedding, response_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (user_id, message, datetime.now(timezone.utc).isoformat(),
-                     user_name, bot_id, bot_name, selected_action, json.dumps(embedding)))
+                     user_name, bot_id, bot_name, selected_action, json.dumps(embedding), response_time))
                 await db.commit()
         except Exception as e:
             logging.error(f"Error saving to database: {e}")
@@ -695,8 +822,7 @@ async def perform_advanced_reasoning(
         except Exception as e:
             logging.error(f"Gemini AI reasoning exception: {e}")
             return "An error occurred while processing your request with Gemini AI."
-
-
+        
 # --- Asynchronous DuckDuckGo search tool ---
 async def duckduckgotool(query) -> str:
     blob = ''
@@ -720,7 +846,6 @@ async def analyze_feedback_from_db():
                     logging.info(f"Feedback: {feedback}")
     except Exception as e:
         logging.error(f"Feedback analysis exception: {e}")
-
 
 # --- Self-Learning (Implemented) ---
 async def retrain_rl_agent():
@@ -839,11 +964,18 @@ async def on_message(message):
         bot_name = bot.user.name
         content = message.content
 
+        # Track the start time for calculating response time
+        start_time = time.time()
+
+        # Calculate the time lapse since the last message from the same user
+        time_lapse = calculate_time_lapse(user_id)
+        if time_lapse is not None:
+            logging.info(f"Time lapse since last message from {user_name}: {time_lapse:.2f} seconds")
+
         # Eğer bot etiketlenmişse ya da adı geçiyorsa yanıt ver
         if bot.user.mentioned_in(message) or bot.user.name in message.content:
 
             message_counter.inc()
-            start_time = time.time()
 
             relevant_history = await get_relevant_history(user_id, content)
             summarized_search = await duckduckgotool(content)
@@ -851,15 +983,14 @@ async def on_message(message):
             # --- Autonomous Feature Execution ---
             if random.random() < 0.2:  # Adjust probability as needed
                 reflection = generate_self_reflection()
-                await message.channel.send(reflection)
+                await safe_send(message.channel, reflection)
 
             if random.random() < 0.3:  # Adjust probability as needed
                 emotional_response = generate_emotional_response(content)
-                await message.channel.send(emotional_response)
+                await safe_send(message.channel, emotional_response)
 
             # --- Get RL State ---
-            current_state = await get_state(message, user_profiles[user_id],
-                                      long_term_memory)
+            current_state = await get_state(message, user_profiles[user_id], long_term_memory)
 
             # --- Reinforcement Learning Action Selection ---
             selected_action = rl_agent.select_action(current_state)
@@ -869,46 +1000,38 @@ async def on_message(message):
                 content, relevant_history, summarized_search, user_id,
                 selected_action, long_term_memory)
 
-            end_time = time.time()
-            response_time = end_time - start_time
+            # Calculate response time
+            response_time = calculate_response_time(start_time)
             response_time_histogram.observe(response_time)
             response_time_summary.observe(response_time)
+
+            logging.info(f"Bot response time: {response_time:.2f} seconds")
 
             # Handle long responses
             if len(response) > 2000:
                 # Split the response into chunks of 2000 characters or less
                 for i in range(0, len(response), 2000):
-                    await message.channel.send(response[i:i + 2000])
+                    await safe_send(message.channel, response[i:i + 2000])
             else:
-                await message.channel.send(response)
+                await safe_send(message.channel, response)
 
             # Save chat history (including selected_action)
-            await save_chat_history(user_id, content, user_name, bot_id,
-                                   response, selected_action)
+            await save_chat_history(user_id, content, user_name, bot_id, response, selected_action)
 
-            logging.info(
-                f"Processed message from {user_name} in {response_time:.2f} seconds"
-            )
+            logging.info(f"Processed message from {user_name} in {response_time:.2f} seconds")
 
             # --- Reinforcement Learning Feedback and Training ---
-            reward = calculate_reward(message, response,
-                                      user_profiles[user_id],
-                                      long_term_memory, selected_action)
-            next_state = await get_state(message, user_profiles[user_id],
-                                      long_term_memory
-                                      )  # Get the next state after the bot responds
-            rl_agent.update_replay_buffer((current_state, selected_action,
-                                       reward, next_state))
+            reward = calculate_reward(message, response, user_profiles[user_id], long_term_memory, selected_action)
+            next_state = await get_state(message, user_profiles[user_id], long_term_memory)
+            rl_agent.update_replay_buffer((current_state, selected_action, reward, next_state))
             rl_agent.train()
 
             # --- Update Long-Term Memory (Example) ---
             if "technology" in response.lower():
-                long_term_memory[user_id]["topics"]["technology"] = long_term_memory[user_id]["topics"].get(
-                    "technology", 0) + 1
+                long_term_memory[user_id]["topics"]["technology"] = long_term_memory[user_id]["topics"].get("technology", 0) + 1
 
     except Exception as e:
         logging.error(f"An error occurred in on_message: {e}", exc_info=True)
-
 
 @bot.event
 async def on_message_edit(before, after):
