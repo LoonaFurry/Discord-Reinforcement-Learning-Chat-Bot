@@ -25,6 +25,8 @@ from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import sys
 import io
 import re
+import aiohttp
+from bs4 import BeautifulSoup
 
 # Force UTF-8 encoding for standard output
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -53,8 +55,8 @@ intents.members = True
 
 # Load environment variables
 load_dotenv()
-discord_token = ("YOUR_DISCORD_TOKEN") 
-gemini_api_key = ("YOUR_GEMINI_API_KEY")
+discord_token = ("discord-bot-token")  # Replace with your actual token
+gemini_api_key = ("gemini-api-key")  # Replace with your actual API key
 
 if not discord_token or not gemini_api_key:
     raise ValueError("DISCORD_BOT_TOKEN or GEMINI_API_KEY not set in environment variables")
@@ -342,7 +344,6 @@ async def generate_response_with_rate_limit(prompt, user_id):
             else:
                 return "I'm sorry, I encountered an error while trying to process your request."
 
-
 # --- Function to Extract Keywords/Topics from Text ---
 def extract_keywords(text):
     tokens = nltk.word_tokenize(text)
@@ -481,7 +482,6 @@ class DialogueStateTracker:
 
         return self.states[current_state]["default_transition"]
 
-
 # *** TODO: Train a Keras LSTM Model and replace this path ***
 state_tracking_model_path = "models/state_tracking_model.keras"
 
@@ -513,6 +513,44 @@ async def gemini_search_and_summarize(query) -> str:
     except Exception as e:
         logging.error(f"Gemini search and summarization error: {e}")
         return "I'm sorry, I encountered an error while searching and summarizing information for you."
+
+
+async def extract_url_from_description(description):
+    """Extracts the URL from the description using web scraping (DuckDuckGo)."""
+
+    search_query = f"{description} site:youtube.com OR site:twitch.tv OR site:instagram.com OR site:twitter.com"  # Customize the sites as needed
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://duckduckgo.com/html/?q={search_query}") as response:
+            html = await response.text()
+            soup = BeautifulSoup(html, "html.parser")
+
+            # Find the first result link
+            first_result = soup.find("a", class_="result__a")
+            if first_result:
+                return first_result["href"]
+            else:
+                return None
+
+async def fix_link_format(text):
+    """Fixes link format and removes duplicate links."""
+    
+    new_text = ""
+    lines = text.split("\n")
+    for line in lines:
+        match = re.match(r"\[(.*?)\]\(link\)", line)  # Match lines with "[link text](link)"
+        if match:
+            link_text = match.group(1)  # Extract the link text 
+            # Extract the URL from the description using web scraping
+            url = await extract_url_from_description(link_text)
+            if url:
+                new_text += f"[{link_text}]({url})\n"  # Use Markdown format 
+            else:
+                new_text += line + "\n"  # Keep the line as is if URL extraction fails
+        else:
+            new_text += line + "\n"  # Keep the line as is if it's not a link
+
+    return new_text
 
 # --- Simulate advanced reasoning with Gemini ---
 async def perform_very_advanced_reasoning(query, relevant_history, summarized_search, user_id):
@@ -618,7 +656,7 @@ async def perform_very_advanced_reasoning(query, relevant_history, summarized_se
     response_text = await generate_response_with_rate_limit(prompt, user_id)
 
     # --- Fix link format and remove duplicate links ---
-    response_text = fix_link_format(response_text)
+    response_text = await fix_link_format(response_text)  # Call the updated function
 
     # --- DQN: Observe Next State and Reward ---
     next_state = calculate_next_state(state, response_text, user_id)
@@ -633,13 +671,14 @@ async def perform_very_advanced_reasoning(query, relevant_history, summarized_se
     return response_text, sentiment
 
 # --- Function to Fix Link Format and Remove Duplicate Links ---
-def fix_link_format(text):
-    links = re.findall(r"\[(.*?)\]\((.*?)\)", text) 
+async def fix_link_format(text):  # Updated function
+    """Fixes link format and removes duplicate links."""
+    links = re.findall(r"\[(.*?)\]\((.*?)\)", text)
     unique_links = []
     for link_text, link_url in links:
         if link_url not in unique_links:
             unique_links.append(link_url)
-            text = text.replace(f"[{link_text}]({link_url})", link_url)  
+            text = text.replace(f"[{link_text}]({link_url})", link_url)
     return text
 
 
