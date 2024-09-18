@@ -53,8 +53,8 @@ intents.members = True
 
 # Load environment variables
 load_dotenv()
-discord_token = ("discord-bot-token") 
-gemini_api_key = ("gemini-api-key")
+discord_token = ("YOUR_DISCORD_TOKEN") 
+gemini_api_key = ("YOUR_GEMINI_API_KEY")
 
 if not discord_token or not gemini_api_key:
     raise ValueError("DISCORD_BOT_TOKEN or GEMINI_API_KEY not set in environment variables")
@@ -329,12 +329,18 @@ async def generate_response_with_rate_limit(prompt, user_id):
 
     user_last_request_time[user_id] = time.time()
 
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        logging.error(f"Error generating response with Gemini: {e}")
-        return "I'm sorry, I encountered an error while trying to process your request."
+    max_retries = 3  # You can adjust the number of retries
+    for retry in range(max_retries):
+        try:
+            response = model.generate_content(prompt)
+            logging.info(f"Raw Gemini response: {response}")
+            return response.text  # Or response.content if that's the correct field
+        except Exception as e:
+            logging.error(f"Error generating response with Gemini (attempt {retry + 1}/{max_retries}): {e}")
+            if retry < max_retries - 1:
+                await asyncio.sleep(2**retry)  # Exponential backoff 
+            else:
+                return "I'm sorry, I encountered an error while trying to process your request."
 
 
 # --- Function to Extract Keywords/Topics from Text ---
