@@ -1027,8 +1027,21 @@ def load_user_profiles():
         return {}
 
 def save_user_profiles(profiles):
+    # Create a deep copy of the profiles to avoid modifying the original data
+    profiles_copy = defaultdict(lambda: {"preferences": {}, "history_summary": "",
+                                            "context": [],  # Initialize context as an empty list
+                                            "personality": {"humor": 0.5, "kindness": 0.8, "assertiveness": 0.6},
+                                            "dialogue_state": "greeting", "long_term_memory": [],
+                                            "last_bot_action": None, "interests": [],
+                                            "query": "", "planning_state": {}})
+
+    for user_id, profile in profiles.items():
+        # Convert the deque to a list
+        profiles_copy[user_id].update(profile)
+        profiles_copy[user_id]["context"] = list(profile["context"])
+
     with open(USER_PROFILES_FILE, "w") as f:
-        json.dump(profiles, f, indent=4)
+        json.dump(profiles_copy, f, indent=4) 
 
 # Save chat history to the database
 db_queue = asyncio.Queue()
