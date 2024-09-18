@@ -53,8 +53,8 @@ intents.members = True
 
 # Load environment variables
 load_dotenv()
-discord_token = ("your-bot-token") 
-gemini_api_key = ("gemini-api-key") 
+discord_token = ("discord-bot-token") 
+gemini_api_key = ("gemini-api-key")
 
 if not discord_token or not gemini_api_key:
     raise ValueError("DISCORD_BOT_TOKEN or GEMINI_API_KEY not set in environment variables")
@@ -488,7 +488,7 @@ async def gemini_search_and_summarize(query) -> str:
     """
     try:
         ddg = AsyncDDGS()
-        search_results = await asyncio.to_thread(ddg.text, query, max_results=100)  # Reduced to 3 for faster processing
+        search_results = await asyncio.to_thread(ddg.text, query, max_results=100)  # Reduced to 100 for faster processing
 
         search_results_text = ""
         for index, result in enumerate(search_results):
@@ -611,6 +611,9 @@ async def perform_very_advanced_reasoning(query, relevant_history, summarized_se
     # --- Generate Response with Gemini ---
     response_text = await generate_response_with_rate_limit(prompt, user_id)
 
+    # --- Fix link format and remove duplicate links ---
+    response_text = fix_link_format(response_text)
+
     # --- DQN: Observe Next State and Reward ---
     next_state = calculate_next_state(state, response_text, user_id)
     reward = calculate_reward(response_text, user_id, chosen_action)
@@ -622,6 +625,16 @@ async def perform_very_advanced_reasoning(query, relevant_history, summarized_se
     agent.update_epsilon()
 
     return response_text, sentiment
+
+# --- Function to Fix Link Format and Remove Duplicate Links ---
+def fix_link_format(text):
+    links = re.findall(r"\[(.*?)\]\((.*?)\)", text) 
+    unique_links = []
+    for link_text, link_url in links:
+        if link_url not in unique_links:
+            unique_links.append(link_url)
+            text = text.replace(f"[{link_text}]({link_url})", link_url)  
+    return text
 
 
 # --- Helper Functions for DQN ---
