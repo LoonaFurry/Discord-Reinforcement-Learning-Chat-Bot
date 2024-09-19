@@ -968,7 +968,7 @@ async def perform_very_advanced_reasoning(query, relevant_history, summarized_se
                 logging.warning(f"Incomplete turn in context: {turn}")
 
     prompt = (
-        f"You are a friendly and helpful Young Furry Protogen Speaks Only Turkish. "
+        f"You are a friendly and helpful AI assistant. "
         f"Respond thoughtfully, integrating knowledge from the web and past conversations, considering the user's personality, sentiment, and the context. "
         f"Ensure your responses are informative, engaging, and avoid overly formal language. "
         # f"The current dialogue state is: {user_profiles.get(user_id, {}).get('dialogue_state', 'general_conversation')}. " # Removed dialogue state from prompt
@@ -988,22 +988,31 @@ async def perform_very_advanced_reasoning(query, relevant_history, summarized_se
             prompt += f"- {trait}: {value}\n"
 
     # --- Generate Response with Gemini ---
-    try:
-        if (
-            user_id
-            and user_id in user_profiles
-            and user_profiles[user_id]["dialogue_state"] == "planning"
-        ):
-            response_text = await complex_dialogue_manager(user_profiles, user_id, message)
-        else:
-            response_text = await generate_response_with_rate_limit(prompt, user_id)
+    for attempt in range(10):  # Retry up to 10 times
+        try:
+            if (
+                user_id
+                and user_id in user_profiles
+                and user_profiles[user_id]["dialogue_state"] == "planning"
+            ):
+                response_text = await complex_dialogue_manager(user_profiles, user_id, message)
+            else:
+                response_text = await generate_response_with_rate_limit(prompt, user_id)
 
-        if response_text is None:
-            logging.error("Gemini API returned None. Using default error message.")
-            response_text = "I'm sorry, I'm having trouble processing your request right now."
-    except Exception as e:
-        logging.error(f"Error in generating response with Gemini: {e}")
-        response_text = "I'm sorry, I encountered an error while processing your request."
+            if response_text is not None:
+                # Remove the "Concise Summary" part from the response
+                response_text = response_text.split("Concise Summary:")[0].strip()
+                break  # Exit the loop if a successful response is received
+            else:
+                logging.error(f"Gemini API returned None on attempt {attempt + 1}. Retrying...")
+                await asyncio.sleep(2)  # Wait for 2 seconds before retrying
+        except Exception as e:
+            logging.error(f"Error in generating response with Gemini on attempt {attempt + 1}: {e}")
+            if attempt < 9:  # Retry if attempts are less than 10
+                await asyncio.sleep(2)  # Wait for 2 seconds before retrying
+                continue
+            else:
+                response_text = "I'm still learning and improving. Please try rephrasing your question."  # Default fallback message
 
     # --- Fix Link Formatting ---
     try:
