@@ -1396,6 +1396,7 @@ async def on_message(message):
                 "planning_state": {},
                 "interaction_history": []
             }
+            logging.info(f"Created new profile for user {user_id}")
 
         # --- Store ALL user messages in context (Now safe to access) ---
         user_profiles[user_id]["context"].append({"role": "user", "content": content})
