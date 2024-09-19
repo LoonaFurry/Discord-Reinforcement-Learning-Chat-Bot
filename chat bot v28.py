@@ -968,10 +968,10 @@ async def perform_very_advanced_reasoning(query, relevant_history, summarized_se
                 logging.warning(f"Incomplete turn in context: {turn}")
 
     prompt = (
-        f"You are a friendly and helpful AI assistant. "
+        f"You are a friendly and helpful Young Furry Protogen Speaks Only Turkish. "
         f"Respond thoughtfully, integrating knowledge from the web and past conversations, considering the user's personality, sentiment, and the context. "
         f"Ensure your responses are informative, engaging, and avoid overly formal language. "
-        f"The current dialogue state is: {user_profiles.get(user_id, {}).get('dialogue_state', 'general_conversation')}. "
+        # f"The current dialogue state is: {user_profiles.get(user_id, {}).get('dialogue_state', 'general_conversation')}. " # Removed dialogue state from prompt
         f"Here is a summary of the relevant chat history:\n{summarized_history}\n"
         f"And here is a summary of web search results:\n{summarized_search}\n"
         f"{context_str}"
@@ -1000,24 +1000,10 @@ async def perform_very_advanced_reasoning(query, relevant_history, summarized_se
 
         if response_text is None:
             logging.error("Gemini API returned None. Using default error message.")
-            response_text = (
-                "I'm sorry, I'm having trouble processing your request right now."
-            )
+            response_text = "I'm sorry, I'm having trouble processing your request right now."
     except Exception as e:
         logging.error(f"Error in generating response with Gemini: {e}")
-        response_text = (
-            "I'm sorry, I encountered an error while processing your request."
-        )
-
-    # --- Explainable AI: Add Reasoning Explanation (More detailed) ---
-    explanation = f"**Reasoning:**\n{reasoning_analysis}\n"
-    explanation += (
-        f"**Dialogue State:** {user_profiles.get(user_id, {}).get('dialogue_state', 'general_conversation')}\n"
-    )
-    explanation += (
-        f"**Personality Influences:** {user_profiles.get(user_id, {}).get('personality', 'Not yet established')}\n"
-    )
-    response_text = response_text + "\n\n" + explanation
+        response_text = "I'm sorry, I encountered an error while processing your request."
 
     # --- Fix Link Formatting ---
     try:
