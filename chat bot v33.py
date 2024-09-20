@@ -13,6 +13,7 @@ import google.generativeai as genai
 from datetime import datetime, timezone
 import numpy as np
 import random
+from google.api_core.exceptions import GoogleAPIError
 import nltk
 import re
 import aiohttp
@@ -51,7 +52,7 @@ logging.basicConfig(
     ]
 )
 
-# --- Bot Instance and Environment Variables ---
+# Bot Instance and Environment Variables
 intents = discord.Intents.all()
 intents.message_content = True
 intents.members = True
@@ -61,7 +62,7 @@ discord_token = ("discord-bot-token")
 gemini_api_key = ("gemini-api-key")
 
 
-# --- Gemini AI Configuration ---
+# Gemini AI Configuration
 genai.configure(api_key=gemini_api_key)
 generation_config = {
     "temperature": 0.7,
@@ -75,16 +76,16 @@ model = genai.GenerativeModel(
     generation_config=generation_config,
 )
 
-# --- Discord Bot Configuration ---
+# Discord Bot Configuration
 bot = discord.Client(intents=intents)
 
-# --- Directory and Database Setup ---
+# Directory and Database Setup
 CODE_DIR = os.path.dirname(__file__)
 DB_FILE = os.path.join(CODE_DIR, 'chat_history.db')
 USER_PROFILES_FILE = os.path.join(CODE_DIR, "user_profiles.json")
 KNOWLEDGE_GRAPH_FILE = os.path.join(CODE_DIR, "knowledge_graph.pkl")
 
-# --- Prometheus Metrics ---
+# Prometheus Metrics
 start_http_server(8000)
 message_counter = Counter('discord_bot_messages_total', 'Total messages processed')
 error_counter = Counter('discord_bot_errors_total', 'Total errors')
@@ -93,7 +94,7 @@ response_time_summary = Summary('discord_bot_response_time_summary', 'Summary of
 active_users = Gauge('discord_bot_active_users', 'Number of active users')
 feedback_count = Counter('discord_bot_feedback_count', 'Number of feedback messages received')
 
-# --- Context Window and User Profiles ---
+# Context Window and User Profiles
 CONTEXT_WINDOW_SIZE = 10000
 user_profiles = defaultdict(lambda: {
     "preferences": {"communication_style": "friendly", "topics_of_interest": []},
@@ -110,18 +111,18 @@ user_profiles = defaultdict(lambda: {
     "interaction_history": []
 })
 
-# --- Dialogue and Action Types ---
+# Dialogue and Action Types
 DIALOGUE_STATES = ["greeting", "question_answering", "storytelling", "general_conversation",
                    "planning", "farewell"]
 BOT_ACTIONS = ["factual_response", "creative_response", "clarifying_question",
                "change_dialogue_state", "initiate_new_topic", "generate_plan", "execute_plan"]
 
-# --- Initialize Sentiment Analyzer, TF-IDF Vectorizer, and Sentence Transformer ---
+# Initialize NLP Tools
 sentiment_analyzer = SentimentIntensityAnalyzer()
 tfidf_vectorizer = TfidfVectorizer()
 sentence_transformer = SentenceTransformer('all-mpnet-base-v2')
 
-# --- Long-Term Memory (Knowledge Graph with Semantic Search) ---
+# Long-Term Memory (Knowledge Graph with Semantic Search)
 class KnowledgeGraph:
     def __init__(self):
         self.graph = {}
@@ -213,7 +214,7 @@ class KnowledgeGraph:
         with open(filename, "rb") as f:
             return pickle.load(f)
 
-# --- Create/Load Knowledge Graph ---
+# Create/Load Knowledge Graph
 knowledge_graph = KnowledgeGraph()
 if os.path.exists(KNOWLEDGE_GRAPH_FILE):
     knowledge_graph.load_from_file(KNOWLEDGE_GRAPH_FILE)
@@ -233,7 +234,7 @@ async def retrieve_long_term_memory(user_id, information_type, query=None, top_k
         related_nodes = knowledge_graph.get_related_nodes("user", user_id, "has_" + information_type)
         return related_nodes
 
-# --- Plan Execution and Monitoring ---
+# Plan Execution and Monitoring
 async def execute_plan_step(plan: Dict, step_index: int, user_id: str, message: discord.Message) -> str:
     step = plan["steps"][step_index]
     execution_prompt = f"""
@@ -412,7 +413,7 @@ async def process_plan_feedback(user_id: str, message: str) -> str:
         return "An error occurred while processing your feedback. Please try again later."
 
 
-# --- User Interest Identification (Word Embeddings & Topic Modeling) ---
+# User Interest Identification (Word Embeddings & Topic Modeling)
 user_message_buffer = defaultdict(list)
 
 
@@ -430,7 +431,7 @@ async def identify_user_interests(user_id: str, message: str):
         for i, message in enumerate(messages):
             user_profiles[user_id]["interests"].append({
                 "message": message,
-                "embedding": embeddings[i].tolist(), # Convert to list
+                "embedding": embeddings[i].tolist(),  # Convert to list
                 "topic": topic_labels[i]
             })
         save_user_profiles()
@@ -451,7 +452,7 @@ async def suggest_new_topic(user_id: str) -> str:
         return "I'm not sure what to talk about next. What are you interested in?"
 
 
-# --- Advanced Dialogue State Tracking with Gemini ---
+# Advanced Dialogue State Tracking with Gemini
 class DialogueStateTracker:
     states = {
         'greeting': {'entry_action': 'greet_user'},
@@ -514,7 +515,7 @@ class DialogueStateTracker:
         ]
         return random.choice(goodbyes)
 
-    def handle_error(self, user_id: str) -> str: 
+    def handle_error(self, user_id: str) -> str:
         return "I'm having a little trouble understanding. Could you please rephrase your request?"
 
     async def classify_dialogue_act(self, user_input: str) -> str:
@@ -534,14 +535,15 @@ class DialogueStateTracker:
                 logging.info(f"Extracted Dialogue Act: {dialogue_act}")
                 return dialogue_act
             except Exception as e:
-                logging.error(f"Error extracting dialogue act from Gemini response: {e}, Attempt: {attempt+1}")
+                logging.error(f"Error extracting dialogue act from Gemini response: {e}, Attempt: {attempt + 1}")
                 await asyncio.sleep(2)  # Wait before retrying
 
         # After 100 attempts, transition to the error state
         self.machine.trigger('error')
         return self.machine.state
 
-    async def transition_state(self, current_state: str, user_input: str, user_id: str, conversation_history: List) -> str:
+    async def transition_state(self, current_state: str, user_input: str, user_id: str,
+                              conversation_history: List) -> str:
         if self.machine.trigger('greet', user_input=user_input):
             return self.machine.state
         if self.machine.trigger('ask_question', user_input=user_input):
@@ -558,17 +560,16 @@ class DialogueStateTracker:
 # Initialize Dialogue State Tracker
 dialogue_state_tracker = DialogueStateTracker()
 
-
-# --- Rate Limit Handling for Gemini ---
+# Rate Limit Handling for Gemini
 RATE_LIMIT_PER_MINUTE_GEMINI = 60
 RATE_LIMIT_WINDOW_GEMINI = 60
 user_last_request_time_gemini = defaultdict(lambda: 0)
 global_last_request_time_gemini = 0
 global_request_count_gemini = 0
 
-@backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=100)
+@backoff.on_exception(backoff.expo, (requests.exceptions.RequestException, GoogleAPIError), max_time=600)  
 async def generate_response_with_gemini(prompt: str, user_id: str = None) -> str:
-    """Generates a response with Gemini, handling rate limits."""
+    """Generates a response with Gemini, handling rate limits and retries."""
     global global_last_request_time_gemini, global_request_count_gemini
     current_time = time.time()
 
@@ -591,12 +592,12 @@ async def generate_response_with_gemini(prompt: str, user_id: str = None) -> str
             await asyncio.sleep(sleep_time)
         user_last_request_time_gemini[user_id] = time.time()
 
+    # Generate response with Gemini
     response = model.generate_content(prompt)
     logging.info(f"Raw Gemini response: {response}")
     return response.text
 
-
-# --- Gemini Search and Summarization ---
+# Gemini Search and Summarization
 async def gemini_search_and_summarize(query: str) -> str:
     try:
         ddg = AsyncDDGS()
@@ -611,7 +612,7 @@ async def gemini_search_and_summarize(query: str) -> str:
             f"Here are some relevant web search results:\n\n"
             f"{search_results_text}\n\n"
             f"Please provide a concise and informative summary of these search results."
-                   )
+        )
 
         response = model.generate_content(prompt)
         return response.text
@@ -621,7 +622,7 @@ async def gemini_search_and_summarize(query: str) -> str:
         return "An error occurred while searching and summarizing information for you."
 
 
-# --- URL Extraction from Description ---
+# URL Extraction from Description
 async def extract_url_from_description(description: str) -> str:
     """Extracts a URL from a description using DuckDuckGo search.
     Prioritizes links from YouTube, Twitch, Instagram, and Twitter.
@@ -639,7 +640,7 @@ async def extract_url_from_description(description: str) -> str:
             else:
                 return None
 
-# --- Link Format Fixing ---
+# Link Format Fixing
 async def clean_url(url: str, description: str = None) -> str:
     """
     Cleans a URL, adds https:// if missing, and validates it.
@@ -661,7 +662,34 @@ async def clean_url(url: str, description: str = None) -> str:
     cleaned_url = re.sub(r"^[^:]+://([^/]+)(.*)$", r"\1\2", cleaned_url)  # Extract domain and path
     cleaned_url = re.sub(r"[^a-zA-Z0-9./?=-]", "", cleaned_url)  # Remove invalid characters
 
-# --- Complex Dialogue Manager ---
+    # 5. Robust Validation with Timeout and Retries
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.head(cleaned_url, timeout=5) as response: # Add timeout
+                    if response.status == 200:
+                        return cleaned_url
+                    else:
+                        logging.warning(f"URL validation failed (attempt {attempt+1}/{max_attempts}): {cleaned_url} - Status: {response.status}")
+                        # (Optional) Try extracting a better URL from the description
+                        if description and attempt < max_attempts - 1:
+                            better_url = await extract_url_from_description(description)
+                            if better_url:
+                                cleaned_url = better_url
+                                logging.info(f"Found a better URL from description: {cleaned_url}")
+                        await asyncio.sleep(1) # Wait before retrying
+        except asyncio.TimeoutError:
+            logging.warning(f"URL validation timed out (attempt {attempt+1}/{max_attempts}): {cleaned_url}")
+            await asyncio.sleep(1)
+        except Exception as e:
+            logging.error(f"Error validating URL (attempt {attempt+1}/{max_attempts}): {e}")
+            await asyncio.sleep(1)
+
+    logging.error(f"URL validation failed after {max_attempts} attempts: {cleaned_url}")
+    return None
+
+# Complex Dialogue Manager
 async def complex_dialogue_manager(user_profiles: Dict, user_id: str, message: discord.Message) -> str:
     if user_profiles[user_id]["dialogue_state"] == "planning":       
         if "stage" not in user_profiles[user_id]["planning_state"]:
@@ -772,6 +800,19 @@ async def extract_goal(query: str) -> Tuple[str, str]:
         logging.error(f"Error extracting goal: {e}")
         return "I couldn't understand your goal. Please try rephrasing.", "general"
     return goal.strip(), "general"
+
+async def find_relevant_url(query: str, context: str) -> str:
+    """Finds a relevant URL based on a query and context using DuckDuckGo search."""
+    try:
+        ddg = AsyncDDGS()
+        search_results = await asyncio.to_thread(ddg.text, query, max_results=1)
+        if search_results:
+            return search_results[0]['href']
+        else:
+            return None
+    except Exception as e:
+        logging.error(f"Error finding relevant URL: {e}")
+        return None
 
 # --- Advanced Reasoning and Response Generation with Gemini ---
 async def handle_question_answering(user_id: str) -> str:
@@ -967,13 +1008,28 @@ async def perform_very_advanced_reasoning(query: str, relevant_history: str, sum
 
         # Final Fixes and Adjustments
         try:
+            # 1. Remove "Gemini: " prefix
+            response_text = response_text.replace("Gemini: ", "")
+
+            # 2. Fix link format (remove brackets)
+            response_text = fix_link_format(response_text)
+            
+            # 3. Find and replace placeholders like "[Link to ...]"
+            for match in re.findall(r"\[Link to (.+?)\]", response_text):
+                url = await find_relevant_url(match, relevant_history)  # Use relevant history as context
+                if url:
+                    response_text = response_text.replace(f"[Link to {match}]", url)
+                else:
+                    response_text = response_text.replace(f"[Link to {match}]", f"I couldn't find a link for '{match}'.")
+
+            # 4. Clean and validate URLs
             cleaned_link = await clean_url(response_text)
             if cleaned_link is not None:
                 response_text = cleaned_link
                 if response_text.strip() == "":
                     logging.error("Error: Gemini returned a whitespace-only response.")
                     response_text = "I'm having a little trouble formulating a response right now. Please try again later."
-            response_text = response_text.replace("Gemini: ", "")
+
         except Exception as e:
             logging.error(f"Error fixing link format or removing 'Gemini: ': {e}")
 
@@ -983,7 +1039,6 @@ async def perform_very_advanced_reasoning(query: str, relevant_history: str, sum
     except Exception as e:
         logging.error(f"Critical Error during advanced reasoning: {e}")
         return "I'm having difficulty thinking right now. Please try again later.", "neutral"
-
 
 # --- Feedback Analysis from Database ---
 async def analyze_feedback_from_db():
@@ -1068,10 +1123,12 @@ def save_user_profiles():
         profiles_copy[user_id].update(profile)
         profiles_copy[user_id]["context"] = list(profile["context"])  # Convert deque to list
 
-        # Convert NumPy arrays in "interests" to lists
+        # Convert NumPy arrays in "interests" to lists, and int32 to int
         for interest in profiles_copy[user_id]["interests"]:
             if isinstance(interest.get("embedding"), np.ndarray):
                 interest["embedding"] = interest["embedding"].tolist()
+            if isinstance(interest.get("topic"), np.int32):  # Convert numpy.int32 to int
+                interest["topic"] = int(interest["topic"])
 
     with open(USER_PROFILES_FILE, "w") as f:
         json.dump(profiles_copy, f, indent=4)
@@ -1306,22 +1363,30 @@ async def on_message(message: discord.Message):
         # Store the bot's response
         user_profiles[user_id]["context"].append({"role": "assistant", "content": response_text})
 
-        # --- Step 10: Final Fixes and Adjustments ---
+        # Final Fixes and Adjustments
         try:
             # 1. Remove "Gemini: " prefix
-            response_text = response_text.replace("Gemini: ", "") 
+            response_text = response_text.replace("Gemini: ", "")
 
             # 2. Fix link format (remove brackets)
             response_text = fix_link_format(response_text)
+            
+            # 3. Find and replace placeholders like "[Link to ...]"
+            for match in re.findall(r"\[Link to (.+?)\]", response_text):
+                url = await find_relevant_url(match, relevant_history)  # Use relevant history as context
+                if url:
+                    response_text = response_text.replace(f"[Link to {match}]", url)
+                else:
+                    response_text = response_text.replace(f"[Link to {match}]", f"I couldn't find a link for '{match}'.")
 
-            # 3. Clean and validate URLs
+            # 4. Clean and validate URLs
             cleaned_link = await clean_url(response_text)
             if cleaned_link is not None:
                 response_text = cleaned_link
                 if response_text.strip() == "":
                     logging.error("Error: Gemini returned a whitespace-only response.")
-                    response_text = "I'm having a little trouble formulating a response right now. Please try again later." 
-            
+                    response_text = "I'm having a little trouble formulating a response right now. Please try again later."
+
         except Exception as e:
             logging.error(f"Error fixing link format or removing 'Gemini: ': {e}")
 
