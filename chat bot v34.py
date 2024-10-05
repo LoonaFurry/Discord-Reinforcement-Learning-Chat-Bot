@@ -38,7 +38,6 @@ from huggingface_hub import login
 HUGGINGFACE_TOKEN = "your-huggingface-token"  # Replace with your Hugging Face token!
 login(HUGGINGFACE_TOKEN)
 
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", handlers=[logging.FileHandler("hata.log", encoding="utf-8"), logging.StreamHandler(sys.stdout)])
 
 intents = discord.Intents.all()
@@ -58,6 +57,7 @@ gemini_model = GenerativeModel("gemini-1.5-pro-002", generation_config=üretim_y
 embedding_model = SentenceTransformer('all-mpnet-base-v2')
 bot = discord.Client(intents=intents)
 gemini_model_name = "gemini-1.5-pro-002"
+
 
 KOD_DİZİNİ = os.path.dirname(__file__)
 VERİTABANI_DOSYASI = os.path.join(KOD_DİZİNİ, "sohbet_gecmisi.db")
@@ -469,7 +469,7 @@ async def açıklamadan_url_çıkar(açıklama):
     arama_sorgusu = f"{açıklama} site:youtube.com OR site:twitch.tv OR site:instagram.com OR site:twitter.com"
     try:
         ddg = AsyncDDGS()
-        results = await ddg.json(arama_sorgusu, max_results=1)  # Get only the top result
+        results = await ddg.json(arama_sorgusu, max_results=1)
         if results and results['results']:
             return results['results'][0]['href']
         else:
@@ -477,7 +477,7 @@ async def açıklamadan_url_çıkar(açıklama):
     except Exception as e:
         logging.error(f"Error in açıklamadan_url_çıkar: {e}")
         return None
-    
+
 async def url_temizle(url, açıklama=None):
     if url is None:
         return None
@@ -487,6 +487,10 @@ async def url_temizle(url, açıklama=None):
     if not temizlenmiş_url.startswith(("https://", "http://")):
         temizlenmiş_url = "https://" + temizlenmiş_url
 
+    # More precise regex for cleaning, avoiding removal of slashes
+    temizlenmiş_url = re.sub(r"[^a-zA-Z0-9./?=-]", "", temizlenmiş_url) #This line is moved up
+
+
     if "youtube.com" in temizlenmiş_url and "www.youtube.com" not in temizlenmiş_url:
         temizlenmiş_url = re.sub(r"(youtube\.com/)(.*)", r"www.youtube.com/\2", temizlenmiş_url)
     elif "twitch.tv" in temizlenmiş_url and "www.twitch.tv" not in temizlenmiş_url:
@@ -495,9 +499,6 @@ async def url_temizle(url, açıklama=None):
         temizlenmiş_url = re.sub(r"(instagram\.com/)(.*)", r"www.instagram.com/\2", temizlenmiş_url)
     elif "twitter.com" in temizlenmiş_url and "www.twitter.com" not in temizlenmiş_url:
         temizlenmiş_url = re.sub(r"(twitter\.com/)(.*)", r"www.twitter.com/\2", temizlenmiş_url)
-
-    temizlenmiş_url = re.sub(r"^[^:]+://([^/]+)(.*)\\$", r"\1\2", temizlenmiş_url)
-    temizlenmiş_url = re.sub(r"[^a-zA-Z0-9./?=-]", "", temizlenmiş_url)
 
     try:
         yanıt = requests.get(temizlenmiş_url)
@@ -509,8 +510,6 @@ async def url_temizle(url, açıklama=None):
     except requests.exceptions.RequestException:
         logging.warning(f"Cleaned URL ({temizlenmiş_url}) is not valid.")
         return None
-
-
 
 async def karmaşık_diyalog_yöneticisi(kullanıcı_profilleri, kullanıcı_kimliği, mesaj):
     if kullanıcı_profilleri[kullanıcı_kimliği]["diyalog_durumu"] == "planlama":
@@ -866,7 +865,7 @@ async def çok_gelişmiş_muhakeme_gerçekleştir(içerik, ilgili_geçmiş, öze
         dil = await dil_tespit_et(içerik)
         logging.info(f"Tespit edilen dil: {dil}")
 
-        istem = f"Sen, karmaşık muhakeme yapabilen ve kullanıcı ihtiyaçlarını anlayabilen son derece gelişmiş bir Protogen Tilkisin. Kullanıcının mesajı: {içerik} İlgili sohbet geçmişi: {ilgili_geçmiş} Özetlenmiş arama sonuçları: {özetlenmiş_arama if özetlenmiş_arama else 'Arama sonucu bulunamadı.'} Kullanıcının sorgusuna ayrıntılı ve yararlı bir yanıt üretin. Yanıtın özel, ilgili ve kullanıcının ihtiyaçlarını karşıladığından emin olun."
+        istem = f"Sen, karmaşık muhakeme yapabilen ve kullanıcı ihtiyaçlarını anlayabilen son derece gelişmiş bir AI asistansısın. Kullanıcının mesajı: {içerik} İlgili sohbet geçmişi: {ilgili_geçmiş} Özetlenmiş arama sonuçları: {özetlenmiş_arama if özetlenmiş_arama else 'Arama sonucu bulunamadı.'} Kullanıcının sorgusuna ayrıntılı ve yararlı bir yanıt üretin. Yanıtın özel, ilgili ve kullanıcının ihtiyaçlarını karşıladığından emin olun."
 
         gemini_yanıtı = await gemini_ile_yanıt_oluştur(istem, kullanıcı_kimliği, dil)
 
@@ -928,14 +927,17 @@ async def change_status():
     ]
     await bot.change_presence(activity=discord.Game(random.choice(statuses)))
 
-
+def split_message(message: str, chunk_size: int = 2000) -> List[str]:
+    chunks = []
+    for i in range(0, len(message), chunk_size):
+        chunks.append(message[i:i + chunk_size])
+    return chunks
 
 @bot.event
 async def on_message(mesaj):
     global aktif_kullanıcılar, hata_sayacı, yanıt_süresi_histogramı, yanıt_süresi_özeti
     if mesaj.author == bot.user:
         return
-
 
     aktif_kullanıcılar += 1
     kullanıcı_kimliği = str(mesaj.author.id)
@@ -995,25 +997,18 @@ async def on_message(mesaj):
         if yanıt_metni:
             async with mesaj.channel.typing():
                 for chunk in split_message(yanıt_metni):
-                   await mesaj.channel.send(chunk)
+                    await mesaj.channel.send(chunk)
         await mesaj.channel.send(yanıt_süresi_özeti)
 
         await sohbet_geçmişini_kaydet(kullanıcı_kimliği, mesaj.content, mesaj.author.name, bot.user.id, bot.user.name)
 
     except Exception as e:
-        logging.error(f"on_message fonksiyonunda hata oluştu: {str(e)}")
+        logging.error(f"on_message fonksiyonunda hata oluştu: {str(e)}", exc_info=True)
         hata_sayacı += 1
 
 
     finally:
         aktif_kullanıcılar -= 1
-
-@bot.event
-async def on_ready():
-    global veritabanı_kilidi
-    logging.info(f"{bot.user} olarak giriş yapıldı!")
-    veritabanı_kilidi = asyncio.Lock()
-    bot.loop.create_task(veritabanı_kuyruğunu_işle())
 
 async def bot_setup():
     bot.loop.create_task(veritabanını_başlat())
@@ -1021,8 +1016,5 @@ async def bot_setup():
 bot.setup_hook = bot_setup
 bot.run(discord_token)
 
-def split_message(message: str, chunk_size: int = 2000) -> List[str]:
-    chunks = []
-    for i in range(0, len(message), chunk_size):
-        chunks.append(message[i:i + chunk_size])
-    return chunks
+
+
